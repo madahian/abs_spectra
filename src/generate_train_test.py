@@ -31,6 +31,7 @@ def canonicalize_smiles(smiles):
 
 
 def main():
+    min_distance_nm = 50 # Minimum distance between absorption peaks (in nm)
     root_dir = get_project_root()
 
     # File paths
@@ -68,14 +69,21 @@ def main():
 
         # Step 3: Extract absorption peaks (sorted by intensity)
         absorption_data = group[["Absorption Maxima", "Wavelength"]].values
-        sorted_peaks = sorted(
-            absorption_data, key=lambda x: x[0], reverse=True
-        )  # Sort by absorption maxima
 
-        # Assign primary/secondary wavelengths (allow NaN for missing peaks)
-        primary = sorted_peaks[0][1] if len(sorted_peaks) >= 1 else None
-        secondary1 = sorted_peaks[1][1] if len(sorted_peaks) >= 2 else None
-        secondary2 = sorted_peaks[2][1] if len(sorted_peaks) >= 3 else None
+        # Sort by absorption intensity (descending)
+        sorted_data = sorted(absorption_data, key=lambda x: x[0], reverse=True)
+
+        # Manually filter peaks for min distance
+        filtered_peaks = []
+        for abs_val, wl in sorted_data:
+            if all((wl - sel_wl >= min_distance_nm) or (sel_wl - wl >= min_distance_nm) for sel_wl in filtered_peaks):
+                filtered_peaks.append(wl)
+            if len(filtered_peaks) >= 3:
+                break
+
+        primary = filtered_peaks[0] if len(filtered_peaks) >= 1 else None
+        secondary1 = filtered_peaks[1] if len(filtered_peaks) >= 2 else None
+        secondary2 = filtered_peaks[2] if len(filtered_peaks) >= 3 else None
 
         processed_data.append(
             {
