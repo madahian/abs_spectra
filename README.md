@@ -1,10 +1,10 @@
 # Digital Alchemy: Molecular Absorption Wavelength Prediction
 
-A Random Forest regression model for predicting absorption wavelengths of molecules using their structural information (SMILES representation).
+A Random Forest regression model for predicting absorption wavelengths corresponding to a maximum in the spectrum of molecules using their structural information (SMILES representation).
 
 ## Project Overview
 
-This project implements a machine learning pipeline to predict molecular absorption wavelengths using Random Forest regression. It processes molecular spectral data, extracts features using Morgan fingerprints, and trains a model to predict primary and secondary absorption wavelengths.
+This project implements a machine learning pipeline to predict molecular absorption wavelengths corresponding to a maximum in the spectrum using Random Forest regression. It processes molecular spectral data, extracts features using Morgan fingerprints, and trains a model to predict primary and secondary absorption wavelengths.
 
 ## File Structure
 
