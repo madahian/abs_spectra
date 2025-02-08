@@ -1,3 +1,4 @@
-data/*.csv
+*.csv
 PhotochemCAD/
 .DS_Store
+__pycache__/

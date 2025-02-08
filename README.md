@@ -10,45 +10,40 @@ This project implements a machine learning pipeline to predict molecular absorpt
 
 ```
 .
+├── config.py                # Configuration parameters and settings
 ├── data/
-│   ├── data_checker.py         # Data validation and visualization script
-│   ├── molecular_data.csv      # Raw molecular data
-│   ├── training_data.csv       # Processed training dataset
-│   └── test_data.csv           # Processed test dataset
-├── src/
-│   ├── data_prep.ipynb         # Data preparation notebook
-│   ├── generate_train_test.py  # Train/test split generation script
-│   └── train_rf_model.ipynb    # Model training and evaluation notebook
-└── PhotochemCAD/               # Raw spectral data directory
+│   ├── processed/         # Processed datasets directory
+│   ├── raw/               # Raw data directory
+│   │   └── PhotochemCAD/  # Raw spectral data
+├── notebooks/
+│   └── model_evaluation.ipynb  # Model evaluation and analysis notebook
+└── src/
+    ├── data_processing.py     # Data processing and feature engineering
+    ├── model_training.py      # Model training and hyperparameter optimization
+    └── utils.py               # Utility functions and helpers
 ```
 
 ## Data Processing Pipeline
 
-### 1. Data Preparation (`data_prep.ipynb`)
+### 1. Data Processing (`src/data_processing.py`)
 
 - Processes raw absorption spectra from `.abs.txt` files
 - Extracts up to 3 highest absorption peaks
 - Retrieves SMILES representations from PubChem
-- Creates initial molecular dataset with:
-  - Molecule identifiers (Code, CAS, Name)
+- Creates processed molecular datasets with:
+  - Molecule identifiers (CAS, Name)
   - SMILES representation
   - Absorption maxima and wavelengths
 
-### 2. Data Validation (`data_checker.py`)
-
-- Checks for missing values
-- Visualizes wavelength and absorption maxima distributions
-- Helps identify potential data quality issues
-
-### 3. Train/Test Generation (`generate_train_test.py`)
+### 2. Model Training (`src/model_training.py`)
 
 - Converts SMILES to canonical form
 - Generates 1024-bit Morgan fingerprints
 - Extracts primary and secondary absorption peaks
-- Splits data into training and test sets by molecule (CAS number)
+- Implements train/test splitting by molecule (CAS number)
 - Ensures no data leakage between splits
 
-## Model Training (`train_rf_model.ipynb`)
+## Model Evaluation (`notebooks/model_evaluation.ipynb`)
 
 ### Features
 
@@ -73,33 +68,33 @@ This project implements a machine learning pipeline to predict molecular absorpt
 
 ### Dataset Setup
 
-Before running the data preparation notebook, you need to download and set up the PhotochemCAD dataset from [https://photochemcad.com/download](https://photochemcad.com/download):
+Before running the data processing script, you need to download and set up the PhotochemCAD dataset from [https://photochemcad.com/download](https://photochemcad.com/download):
 
 1. Download the PhotochemCAD dataset
-2. After extraction, place the dataset in the root directory of the project as 'PhotochemCAD' folder
+2. After extraction, place the dataset in the data/raw directory as 'PhotochemCAD' folder
 3. Ensure the 'PhotochemCAD' folder contains the 'Common Compounds' folder which includes `.abs.txt` files
 
 ### Data Processing and Model Training
 
-1. Data Preparation:
+1. Data Processing:
 
 ```bash
 # Process raw spectral data and create molecular dataset
-jupyter notebook src/data_prep.ipynb
+python -m src.data_processing
 ```
 
-2. Generate Train/Test Sets:
-
-```bash
-# Create training and test datasets
-python src/generate_train_test.py
-```
-
-3. Train Model:
+2. Train Model:
 
 ```bash
 # Train and evaluate the Random Forest model
-jupyter notebook src/train_rf_model.ipynb
+python -m src.model_training
+```
+
+Or alternatively:
+
+```bash
+# Analyze model performance and visualize results
+jupyter notebook notebooks/model_evaluation.ipynb
 ```
 
 ## Dependencies
