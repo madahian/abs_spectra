@@ -16,7 +16,7 @@ This project implements a machine learning pipeline to predict molecular absorpt
 │   ├── raw/               # Raw data directory
 │   │   └── PhotochemCAD/  # Raw spectral data
 ├── notebooks/
-│   └── model_evaluation.ipynb  # Model evaluation and analysis notebook
+│   └── rf_model_pipeline.ipynb  # Model training and evaluation notebook
 └── src/
     ├── data_processing.py     # Data processing and feature engineering
     ├── model_training.py      # Model training and hyperparameter optimization
@@ -43,7 +43,7 @@ This project implements a machine learning pipeline to predict molecular absorpt
 - Implements train/test splitting by molecule (CAS number)
 - Ensures no data leakage between splits
 
-## Model Evaluation (`notebooks/model_evaluation.ipynb`)
+## Model Evaluation (`notebooks/rf_model_pipeline.ipynb`)
 
 ### Features
 
@@ -76,25 +76,27 @@ Before running the data processing script, you need to download and set up the P
 
 ### Data Processing and Model Training
 
-1. Data Processing:
+1. Via jupyter notebook:
+
+```bash
+# Run the whole pipeline
+jupyter notebook notebooks/rf_model_pipeline.ipynb
+```
+
+2. Alternatively:
+
+Data Processing:
 
 ```bash
 # Process raw spectral data and create molecular dataset
 python -m src.data_processing
 ```
 
-2. Train Model:
+Train Model:
 
 ```bash
 # Train and evaluate the Random Forest model
 python -m src.model_training
-```
-
-Or alternatively:
-
-```bash
-# Analyze model performance and visualize results
-jupyter notebook notebooks/model_evaluation.ipynb
 ```
 
 ## Dependencies

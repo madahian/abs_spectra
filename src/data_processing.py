@@ -175,10 +175,7 @@ def main():
     training_data_csv = config.TRAIN_DATA_CSV
     test_data_csv = config.TEST_DATA_CSV
 
-    # Step 1: Extract data from raw files to generate molecular_data.csv
     extract_molecular_data(raw_dir, molecular_data_csv, max_peaks=config.MAX_PEAKS)
-
-    # Step 2: Process molecular_data.csv to generate training and test CSVs
     process_molecular_csv(molecular_data_csv, training_data_csv, test_data_csv)
 
 
