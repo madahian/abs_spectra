@@ -11,7 +11,4 @@ TEST_DATA_CSV = os.path.join(PROCESSED_DATA_DIR, "test_data.csv")
 
 # Absorption data settings
 ABS_THRESHOLD = 0.01
-MAX_PEAKS = 3
-
-# ML target settings
-PEAK_WEIGHTS = {"primary": 0.5, "secondary1": 0.3, "secondary2": 0.2}
+MAX_PEAKS = 1

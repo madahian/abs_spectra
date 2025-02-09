@@ -1,49 +1,33 @@
 import numpy as np
+import os
+import sys
 import pandas as pd
 import logging
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import mean_squared_error, r2_score
+from .utils import mean_absolute_error_ev, wavelength_to_ev, bitstring_to_array
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 import config
 
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
-def bitstring_to_array(bitstring):
-    """Convert a fingerprint bitstring to a numpy array."""
-    return np.array([int(bit) for bit in bitstring])
-
-
 def prepare_features_targets(train_df, test_df):
+    """
+    Prepare features (Morgan fingerprints) and targets (primary wavelength) for training.
+    """
     # Convert fingerprints from bitstring to numerical arrays
     X_train = np.vstack(train_df["MorganFingerprint"].apply(bitstring_to_array).values)
     X_test = np.vstack(test_df["MorganFingerprint"].apply(bitstring_to_array).values)
 
-    # Create binary flags for secondary peaks
-    for df in [train_df, test_df]:
-        df["Has_Secondary1"] = df["SecondaryWavelength1"].notna().astype(int)
-        df["Has_Secondary2"] = df["SecondaryWavelength2"].notna().astype(int)
-
-    X_train = np.hstack(
-        [X_train, train_df[["Has_Secondary1", "Has_Secondary2"]].values]
-    )
-    X_test = np.hstack([X_test, test_df[["Has_Secondary1", "Has_Secondary2"]].values])
-
-    # Fill missing secondary wavelengths with 0 and create weighted target using config.PEAK_WEIGHTS
-    for df in [train_df, test_df]:
-        df["SecondaryWavelength1"] = df["SecondaryWavelength1"].fillna(0)
-        df["SecondaryWavelength2"] = df["SecondaryWavelength2"].fillna(0)
-        df["WeightedWavelength"] = (
-            config.PEAK_WEIGHTS["primary"] * df["PrimaryWavelength"]
-            + config.PEAK_WEIGHTS["secondary1"] * df["SecondaryWavelength1"]
-            + config.PEAK_WEIGHTS["secondary2"] * df["SecondaryWavelength2"]
-        )
-
-    y_train = train_df["WeightedWavelength"].values
-    y_test = test_df["WeightedWavelength"].values
+    # Use primary wavelength as target
+    y_train = train_df["PrimaryWavelength"].values
+    y_test = test_df["PrimaryWavelength"].values
 
     logging.info(f"X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
     return X_train, X_test, y_train, y_test
@@ -73,34 +57,74 @@ def train_and_tune_rf(X_train, y_train):
 
 def evaluate_model(model, X_test, y_test):
     y_pred = model.predict(X_test)
+
+    # Wavelength metrics
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
-    logging.info(f"Test MSE: {mse:.4f}")
-    logging.info(f"Test R^2: {r2:.4f}")
-    return y_pred, mse, r2
+
+    # Energy metrics
+    mae_ev = mean_absolute_error_ev(y_test, y_pred)
+
+    logging.info(f"Test MSE (wavelength): {mse:.4f} nm²")
+    logging.info(f"Test R²: {r2:.4f}")
+    logging.info(f"Test MAE (energy): {mae_ev:.4f} eV")
+
+    return y_pred, mse, r2, mae_ev
 
 
 def plot_results(y_test, y_pred):
-    plt.figure(figsize=(6, 6))
-    sns.scatterplot(x=y_test, y=y_pred)
-    plt.plot(
+    # Wavelength plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    sns.scatterplot(x=y_test, y=y_pred, ax=ax1)
+    ax1.plot(
         [min(y_test), max(y_test)],
         [min(y_test), max(y_test)],
         color="red",
         linestyle="--",
     )
-    plt.xlabel("Actual Wavelength")
-    plt.ylabel("Predicted Wavelength")
-    plt.title("Predicted vs. Actual Wavelength")
+    ax1.set_xlabel("Actual Wavelength (nm)")
+    ax1.set_ylabel("Predicted Wavelength (nm)")
+    ax1.set_title("Predicted vs. Actual Wavelength")
+
+    # Energy plot
+    y_test_ev = wavelength_to_ev(y_test)
+    y_pred_ev = wavelength_to_ev(y_pred)
+
+    sns.scatterplot(x=y_test_ev, y=y_pred_ev, ax=ax2)
+    ax2.plot(
+        [min(y_test_ev), max(y_test_ev)],
+        [min(y_test_ev), max(y_test_ev)],
+        color="red",
+        linestyle="--",
+    )
+    ax2.set_xlabel("Actual Energy (eV)")
+    ax2.set_ylabel("Predicted Energy (eV)")
+    ax2.set_title("Predicted vs. Actual Energy")
+
+    plt.tight_layout()
     plt.show()
 
-    errors = y_pred - y_test
-    plt.figure(figsize=(6, 4))
-    sns.histplot(errors, kde=True)
-    plt.axvline(0, color="red", linestyle="--")
-    plt.xlabel("Prediction Error (Residuals)")
-    plt.ylabel("Count")
-    plt.title("Error Distribution")
+    # Error distributions
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    # Wavelength errors
+    errors_nm = y_pred - y_test
+    sns.histplot(errors_nm, kde=True, ax=ax1)
+    ax1.axvline(0, color="red", linestyle="--")
+    ax1.set_xlabel("Wavelength Error (nm)")
+    ax1.set_ylabel("Count")
+    ax1.set_title("Wavelength Error Distribution")
+
+    # Energy errors
+    errors_ev = y_pred_ev - y_test_ev
+    sns.histplot(errors_ev, kde=True, ax=ax2)
+    ax2.axvline(0, color="red", linestyle="--")
+    ax2.set_xlabel("Energy Error (eV)")
+    ax2.set_ylabel("Count")
+    ax2.set_title("Energy Error Distribution")
+
+    plt.tight_layout()
     plt.show()
 
 
@@ -113,7 +137,8 @@ def main():
 
     X_train, X_test, y_train, y_test = prepare_features_targets(train_df, test_df)
     best_model = train_and_tune_rf(X_train, y_train)
-    y_pred, mse, r2 = evaluate_model(best_model, X_test, y_test)
+    y_pred, mse, r2, mae_ev = evaluate_model(best_model, X_test, y_test)
+
     plot_results(y_test, y_pred)
 
 

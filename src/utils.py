@@ -116,3 +116,21 @@ def get_smiles_from_pubchem(
         f"Failed to retrieve SMILES for {identifier} after {max_retries} attempts."
     )
     return None
+
+
+def wavelength_to_ev(wavelength_nm):
+    """Convert wavelength in nanometers to energy in electron volts."""
+    return 1240 / wavelength_nm
+
+
+def mean_absolute_error_ev(y_true_nm, y_pred_nm):
+    """Calculate mean absolute error in eV."""
+    y_true_ev = wavelength_to_ev(y_true_nm)
+    y_pred_ev = wavelength_to_ev(y_pred_nm)
+    return np.mean(np.abs(y_true_ev - y_pred_ev))
+
+
+def bitstring_to_array(bitstring):
+    """Convert a fingerprint bitstring to a numpy array."""
+    return np.array([int(bit) for bit in bitstring])
+

@@ -102,7 +102,6 @@ def process_molecular_csv(
     input_csv,
     output_train_csv,
     output_test_csv,
-    min_distance_nm=50,
     test_size=0.2,
     random_state=42,
 ):
@@ -130,27 +129,14 @@ def process_molecular_csv(
             continue
 
         absorption_data = group[["Absorption Maxima", "Wavelength"]].values
-        sorted_data = sorted(absorption_data, key=lambda x: x[0], reverse=True)
-
-        filtered_peaks = []
-        for abs_val, wl in sorted_data:
-            if all(abs(wl - sel_wl) >= min_distance_nm for sel_wl in filtered_peaks):
-                filtered_peaks.append(wl)
-            if len(filtered_peaks) >= 3:
-                break
-
-        primary = filtered_peaks[0] if len(filtered_peaks) >= 1 else None
-        secondary1 = filtered_peaks[1] if len(filtered_peaks) >= 2 else None
-        secondary2 = filtered_peaks[2] if len(filtered_peaks) >= 3 else None
+        # Get wavelength corresponding to maximum absorption
+        primary = absorption_data[absorption_data[:, 0].argmax()][1]
 
         processed_data.append(
             {
                 "Molecule CAS": cas,
-                "CanonicalSMILES": unique_canon_smiles[0],
                 "MorganFingerprint": fingerprint,
                 "PrimaryWavelength": primary,
-                "SecondaryWavelength1": secondary1,
-                "SecondaryWavelength2": secondary2,
             }
         )
 
