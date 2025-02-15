@@ -19,6 +19,25 @@ from src.utils import extract_absorption_data, get_smiles_from_pubchem
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
+def detect_outliers(df, column, threshold=1.5):
+    """
+    Detect outliers using the IQR method.
+    Returns a boolean mask where True indicates an outlier.
+    """
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - threshold * IQR
+    upper_bound = Q3 + threshold * IQR
+    outliers = (df[column] < lower_bound) | (df[column] > upper_bound)
+    
+    if outliers.any():
+        logging.info(f"Detected {outliers.sum()} outliers in {column}")
+        logging.info(f"Value range: [{lower_bound:.2f}, {upper_bound:.2f}]")
+    
+    return outliers
+
+
 def extract_molecular_data(raw_dir, output_csv, max_peaks=None):
     """
     Process raw absorption files from raw_dir and generate a CSV with molecular data.
@@ -75,6 +94,15 @@ def extract_molecular_data(raw_dir, output_csv, max_peaks=None):
                 )
 
     df = pd.DataFrame(data)
+    
+    # Detect outliers in absorption data
+    wavelength_outliers = detect_outliers(df, "Wavelength")
+    absorption_outliers = detect_outliers(df, "Absorption Maxima")
+    
+    # Add outlier flags to DataFrame
+    df["Wavelength_Outlier"] = wavelength_outliers
+    df["Absorption_Outlier"] = absorption_outliers
+    
     df.to_csv(output_csv, index=False)
     successful_molecules = len(set(df['Molecule Name']))
     total_molecules = len(files)
@@ -107,6 +135,7 @@ def process_molecular_csv(
 ):
     """
     Process the molecular_data.csv to generate training and testing datasets.
+    Includes outlier detection and handling.
     """
     df = pd.read_csv(input_csv)
     processed_data = []
@@ -131,22 +160,34 @@ def process_molecular_csv(
         absorption_data = group[["Absorption Maxima", "Wavelength"]].values
         # Get wavelength corresponding to maximum absorption
         primary = absorption_data[absorption_data[:, 0].argmax()][1]
+        
+        # Check if primary wavelength was marked as outlier
+        is_outlier = group.loc[group["Wavelength"] == primary, "Wavelength_Outlier"].iloc[0]
 
         processed_data.append(
             {
                 "Molecule CAS": cas,
                 "MorganFingerprint": fingerprint,
                 "PrimaryWavelength": primary,
+                "Is_Outlier": is_outlier
             }
         )
 
     processed_df = pd.DataFrame(processed_data)
+    
+    # Split data ensuring outliers are distributed between train and test sets
     unique_cas = processed_df["Molecule CAS"].unique()
     train_cas, test_cas = train_test_split(
-        unique_cas, test_size=test_size, random_state=random_state
+        unique_cas, test_size=test_size, random_state=random_state, 
+        stratify=processed_df.groupby("Molecule CAS")["Is_Outlier"].first()
     )
     train_df = processed_df[processed_df["Molecule CAS"].isin(train_cas)]
     test_df = processed_df[processed_df["Molecule CAS"].isin(test_cas)]
+
+    # Log outlier statistics
+    logging.info(f"Total outliers in dataset: {processed_df['Is_Outlier'].sum()}")
+    logging.info(f"Outliers in training set: {train_df['Is_Outlier'].sum()}")
+    logging.info(f"Outliers in test set: {test_df['Is_Outlier'].sum()}")
 
     train_df.to_csv(output_train_csv, index=False)
     test_df.to_csv(output_test_csv, index=False)

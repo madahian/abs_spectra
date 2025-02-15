@@ -2,13 +2,93 @@ import time
 import logging
 import requests
 import numpy as np
-import pandas as pd
 from scipy.signal import find_peaks
 from pubchempy import get_compounds, NotFoundError, PubChemHTTPError
+from sklearn.metrics import mean_squared_error, r2_score
 
 import config
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+def generate_performance_report(y_test, y_pred, outliers, anomalies=None, stat_outliers=None):
+    """
+    Generate a comprehensive performance report including outlier analysis.
+    """
+    report = []
+    report.append("=" * 50)
+    report.append("PERFORMANCE REPORT")
+    report.append("=" * 50)
+    
+    # Overall Performance
+    overall_mse = mean_squared_error(y_test, y_pred)
+    overall_r2 = r2_score(y_test, y_pred)
+    overall_mae_ev = mean_absolute_error_ev(y_test, y_pred)
+    
+    report.append("\nOVERALL METRICS")
+    report.append(f"MSE (wavelength): {overall_mse:.4f} nm²")
+    report.append(f"R²: {overall_r2:.4f}")
+    report.append(f"MAE (energy): {overall_mae_ev:.4f} eV")
+    
+    # Performance excluding prediction outliers
+    non_outliers = ~outliers
+    clean_mse = mean_squared_error(y_test[non_outliers], y_pred[non_outliers])
+    clean_r2 = r2_score(y_test[non_outliers], y_pred[non_outliers])
+    clean_mae_ev = mean_absolute_error_ev(y_test[non_outliers], y_pred[non_outliers])
+    
+    report.append("\nMETRICS (EXCLUDING PREDICTION OUTLIERS)")
+    report.append(f"MSE (wavelength): {clean_mse:.4f} nm²")
+    report.append(f"R²: {clean_r2:.4f}")
+    report.append(f"MAE (energy): {clean_mae_ev:.4f} eV")
+    
+    # Outlier Analysis
+    report.append("\nOUTLIER ANALYSIS")
+    report.append(f"Total samples: {len(y_test)}")
+    report.append(f"Prediction outliers: {sum(outliers)} ({sum(outliers)/len(outliers)*100:.1f}%)")
+    
+    if anomalies is not None:
+        report.append(f"Anomalies detected: {sum(anomalies)} ({sum(anomalies)/len(anomalies)*100:.1f}%)")
+        report.append(f"Overlap (pred/anom): {sum(outliers & anomalies)} samples")
+    
+    if stat_outliers is not None:
+        report.append(f"Statistical outliers: {sum(stat_outliers)} ({sum(stat_outliers)/len(stat_outliers)*100:.1f}%)")
+        report.append(f"Overlap (pred/stat): {sum(outliers & stat_outliers)} samples")
+        if anomalies is not None:
+            report.append(f"Overlap (anom/stat): {sum(anomalies & stat_outliers)} samples")
+            report.append(f"Agreement across all methods: {sum(outliers & anomalies & stat_outliers)} samples")
+    
+    # Error Analysis
+    errors = np.abs(y_pred - y_test)
+    report.append("\nERROR ANALYSIS")
+    report.append(f"Mean absolute error: {np.mean(errors):.4f} nm")
+    report.append(f"Error std dev: {np.std(errors):.4f} nm")
+    report.append(f"Max error: {np.max(errors):.4f} nm")
+    report.append(f"Median error: {np.median(errors):.4f} nm")
+    
+    # Outlier-specific metrics
+    if sum(outliers) > 0:
+        out_mse = mean_squared_error(y_test[outliers], y_pred[outliers])
+        out_r2 = r2_score(y_test[outliers], y_pred[outliers])
+        out_mae_ev = mean_absolute_error_ev(y_test[outliers], y_pred[outliers])
+        
+        report.append("\nOUTLIER METRICS")
+        report.append(f"MSE (wavelength): {out_mse:.4f} nm²")
+        report.append(f"R²: {out_r2:.4f}")
+        report.append(f"MAE (energy): {out_mae_ev:.4f} eV")
+    
+    report.append("=" * 50)
+    return "\n".join(report)
+
+
+def detect_prediction_outliers(y_true, y_pred, threshold=2):
+    """
+    Detect outliers based on prediction errors using z-score.
+    Returns boolean mask where True indicates an outlier.
+    """
+    errors = np.abs(y_true - y_pred)
+    z_scores = (errors - errors.mean()) / errors.std()
+    outliers = np.abs(z_scores) > threshold
+    return outliers
 
 
 def extract_absorption_data(filepath, threshold=None, normalize=True, max_peaks=None):
@@ -37,7 +117,7 @@ def extract_absorption_data(filepath, threshold=None, normalize=True, max_peaks=
         return []
 
     wavelengths, absorptions = [], []
-    for line in lines[header_index + 1 :]:
+    for line in lines[header_index + 1:]:
         parts = line.strip().split()
         if len(parts) >= 2:
             try:
@@ -133,4 +213,3 @@ def mean_absolute_error_ev(y_true_nm, y_pred_nm):
 def bitstring_to_array(bitstring):
     """Convert a fingerprint bitstring to a numpy array."""
     return np.array([int(bit) for bit in bitstring])
-
