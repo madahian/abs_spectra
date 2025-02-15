@@ -4,7 +4,7 @@ A Random Forest regression model for predicting absorption wavelengths correspon
 
 ## Project Overview
 
-This project implements a machine learning pipeline to predict molecular absorption wavelengths corresponding to a maximum in the spectrum using Random Forest regression. It processes molecular spectral data, extracts features using Morgan fingerprints, and trains a model to predict primary and secondary absorption wavelengths.
+This project implements a machine learning pipeline to predict molecular absorption wavelength corresponding to a maximum in the spectrum using Random Forest regression. It processes molecular spectral data, extracts features using Morgan fingerprints, and trains a model to predict the primary absorption wavelength.
 
 ## File Structure
 
@@ -28,18 +28,18 @@ This project implements a machine learning pipeline to predict molecular absorpt
 ### 1. Data Processing (`src/data_processing.py`)
 
 - Processes raw absorption spectra from `.abs.txt` files
-- Extracts up to 3 highest absorption peaks
+- Extracts primary absorption peak
 - Retrieves SMILES representations from PubChem
 - Creates processed molecular datasets with:
   - Molecule identifiers (CAS, Name)
   - SMILES representation
-  - Absorption maxima and wavelengths
+  - Primary absorption wavelength
 
 ### 2. Model Training (`src/model_training.py`)
 
 - Converts SMILES to canonical form
 - Generates 1024-bit Morgan fingerprints
-- Extracts primary and secondary absorption peaks
+- Extracts primary absorption peak
 - Implements train/test splitting by molecule (CAS number)
 - Ensures no data leakage between splits
 
@@ -48,8 +48,7 @@ This project implements a machine learning pipeline to predict molecular absorpt
 ### Features
 
 - Morgan fingerprints (1024 bits)
-- Secondary peak presence flags
-- Weighted wavelength targets
+- Primary wavelength target
 
 ### Model Architecture
 
