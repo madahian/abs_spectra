@@ -52,9 +52,19 @@ This project implements a machine learning pipeline to predict molecular absorpt
 
 ### Model Architecture
 
-- Random Forest Regressor
-- Hyperparameter optimization via GridSearch/BayesSearchCV
-- 5-fold cross-validation
+- Random Forest Regressor with optimized hyperparameters:
+  - n_estimators: 134
+  - max_depth: 78
+  - max_features: 0.3007
+  - min_samples_split: 2
+  - bootstrap: True
+
+### Hyperparameter Optimization
+
+The model supports multiple optimization strategies:
+1. **Default Mode**: Uses pre-optimized parameters for stable performance
+2. **Broad Search**: RandomizedSearchCV for extensive parameter space exploration
+3. **Advanced Optimization**: Optuna integration for sophisticated hyperparameter tuning
 
 ### Performance Metrics
 
@@ -98,6 +108,21 @@ Train Model:
 python -m src.model_training
 ```
 
+### Optimization Methods
+
+To use different optimization strategies:
+
+```python
+# For stable use (pre-optimized parameters)
+model = train_and_tune_rf(X_train, y_train, optimization_method='final')
+
+# For broad parameter space exploration
+model = train_and_tune_rf(X_train, y_train, optimization_method='broad_search')
+
+# For Optuna optimization
+model = train_and_tune_rf(X_train, y_train, optimization_method='optuna')
+```
+
 ## Dependencies
 
 - Python 3.x
@@ -109,6 +134,7 @@ python -m src.model_training
 - seaborn
 - scikit-optimize
 - PubChemPy
+- optuna
 - Jupyter Notebook
 
 ## License
