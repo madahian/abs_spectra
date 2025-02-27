@@ -29,19 +29,23 @@ This project implements a machine learning pipeline to predict molecular absorpt
 
 - Processes raw absorption spectra from `.abs.txt` files
 - Extracts primary absorption peak
-- Retrieves SMILES representations from PubChem
+- Retrieves SMILES representations from PubChem using batch processing
+- Implements parallel processing for file handling
+- Performs outlier detection using IQR method for wavelength and absorption values
 - Creates processed molecular datasets with:
   - Molecule identifiers (CAS, Name)
   - SMILES representation
   - Primary absorption wavelength
+  - Outlier flags for wavelength and absorption values
 
 ### 2. Model Training (`src/model_training.py`)
 
 - Converts SMILES to canonical form
 - Generates 1024-bit Morgan fingerprints
 - Extracts primary absorption peak
-- Implements train/test splitting by molecule (CAS number)
-- Ensures no data leakage between splits
+- Implements stratified train/test splitting by molecule (CAS number)
+  - Ensures balanced distribution of outliers between splits
+  - Prevents data leakage across splits
 
 ## Model Evaluation (`notebooks/rf_model_pipeline.ipynb`)
 

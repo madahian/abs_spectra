@@ -12,11 +12,32 @@ from sklearn.model_selection import train_test_split
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
+import math
 
 import config
-from src.utils import extract_absorption_data, get_smiles_from_pubchem
+from src.utils import extract_absorption_data, get_smiles_batch
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+class TqdmLoggingHandler(logging.Handler):
+    def __init__(self, level=logging.NOTSET):
+        super().__init__(level)
+        self.formatter = logging.Formatter("%(levelname)s: %(message)s")
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+for handler in logger.handlers[:]:
+    logger.removeHandler(handler)
+logger.addHandler(TqdmLoggingHandler())
 
 
 def detect_outliers(df, column, threshold=1.5):
@@ -30,30 +51,45 @@ def detect_outliers(df, column, threshold=1.5):
     lower_bound = Q1 - threshold * IQR
     upper_bound = Q3 + threshold * IQR
     outliers = (df[column] < lower_bound) | (df[column] > upper_bound)
-    
+
     if outliers.any():
         logging.info(f"Detected {outliers.sum()} outliers in {column}")
         logging.info(f"Value range: [{lower_bound:.2f}, {upper_bound:.2f}]")
-    
+
     return outliers
 
 
-def extract_molecular_data(raw_dir, output_csv, max_peaks=None):
+def extract_molecular_data(
+    raw_dir, output_csv, max_peaks=None, batch_size=50, max_workers=10
+):
     """
     Process raw absorption files from raw_dir and generate a CSV with molecular data.
+    Uses batch processing for SMILES retrieval and parallel processing for file handling.
+
+    Args:
+        raw_dir: Directory containing raw absorption files
+        output_csv: Path to save the processed CSV file
+        max_peaks: Maximum number of absorption peaks to extract per file
+        batch_size: Number of molecules to process in a batch for SMILES retrieval
+        max_workers: Maximum number of parallel workers for file processing
     """
     if max_peaks is None:
         max_peaks = config.MAX_PEAKS
+
     data = []
     processed_molecules = set()
     files = [f for f in os.listdir(raw_dir) if f.endswith(".abs.txt")]
-
-    for filename in tqdm(files, desc="Extracting molecular data", unit="file"):
-        if filename.endswith(".abs.txt"):
+    total_files = len(files)
+    molecule_info = []
+    with tqdm(
+        total=total_files, desc="Parsing files", unit="file", position=0, leave=False
+    ) as pbar:
+        for filename in files:
             filepath = os.path.join(raw_dir, filename)
             match = re.match(r"([A-Z]\d+)_((\d+-)+\d+)_(.+?)\.abs\.txt", filename)
             if not match:
                 logging.warning(f"Skipping file {filename} due to invalid format.")
+                pbar.update(1)
                 continue
 
             molecule_code = match.group(1)
@@ -61,52 +97,131 @@ def extract_molecular_data(raw_dir, output_csv, max_peaks=None):
             molecule_name = match.group(4)
 
             if molecule_name in processed_molecules:
+                pbar.update(1)
                 continue
+
             processed_molecules.add(molecule_name)
+            molecule_info.append(
+                {
+                    "filepath": filepath,
+                    "filename": filename,
+                    "molecule_code": molecule_code,
+                    "molecule_id": molecule_id,
+                    "molecule_name": molecule_name,
+                }
+            )
+            pbar.update(1)
 
-            smiles = get_smiles_from_pubchem(molecule_id, identifier_type="cas")
-            if smiles is None:
-                smiles = get_smiles_from_pubchem(molecule_name, identifier_type="name")
-            if smiles is None:
-                logging.warning(
-                    f"Could not retrieve SMILES for {molecule_name}. Skipping the molecule."
-                )
-                continue
+    # Process molecules in batches to retrieve SMILES
+    total_molecules = len(molecule_info)
+    num_batches = math.ceil(total_molecules / batch_size)
 
-            smiles_list = [s.strip() for s in smiles.splitlines() if s.strip()]
-            peaks = extract_absorption_data(filepath, max_peaks=max_peaks)
-            if peaks and isinstance(peaks, list) and len(peaks) > 0:
-                for smile in smiles_list:
-                    for wavelength, absorption in peaks:
-                        data.append(
-                            {
-                                "Molecule Code": molecule_code,
-                                "Molecule CAS": molecule_id,
-                                "Molecule Name": molecule_name.replace("_", " "),
-                                "SMILES": smile,
-                                "Absorption Maxima": absorption,
-                                "Wavelength": wavelength,
-                            }
-                        )
-            else:
-                logging.warning(
-                    f"No valid peaks found in {filename} or error during extraction."
-                )
+    logging.info(
+        f"Processing {total_molecules} unique molecules in {num_batches} batches"
+    )
+
+    # Processing individual molecules
+    def process_molecule(info, smiles_data):
+        filepath = info["filepath"]
+        filename = info["filename"]
+        molecule_code = info["molecule_code"]
+        molecule_id = info["molecule_id"]
+        molecule_name = info["molecule_name"]
+
+        # Get SMILES from the batch results
+        smiles = smiles_data.get(molecule_id)
+        if smiles is None:
+            smiles = smiles_data.get(molecule_name)
+
+        if smiles is None:
+            logging.warning(
+                f"Could not retrieve SMILES for {molecule_name}. Skipping the molecule."
+            )
+            return []
+
+        smiles_list = [s.strip() for s in smiles.splitlines() if s.strip()]
+        peaks = extract_absorption_data(filepath, max_peaks=max_peaks)
+
+        result = []
+        if peaks and isinstance(peaks, list) and len(peaks) > 0:
+            for smile in smiles_list:
+                for wavelength, absorption in peaks:
+                    result.append(
+                        {
+                            "Molecule Code": molecule_code,
+                            "Molecule CAS": molecule_id,
+                            "Molecule Name": molecule_name.replace("_", " "),
+                            "SMILES": smile,
+                            "Absorption Maxima": absorption,
+                            "Wavelength": wavelength,
+                        }
+                    )
+        else:
+            logging.warning(
+                f"No valid peaks found in {filename} or error during extraction."
+            )
+
+        return result
+
+    with tqdm(
+        total=total_molecules,
+        desc="Processing molecules",
+        unit="molecule",
+        position=0,
+        leave=True,
+    ) as pbar:
+        for i in range(0, total_molecules, batch_size):
+            batch = molecule_info[i : i + batch_size]
+
+            # Get SMILES for this batch using CAS IDs
+            cas_ids = [m["molecule_id"] for m in batch]
+            smiles_by_cas = get_smiles_batch(cas_ids, identifier_type="cas")
+
+            # For molecules without SMILES, try names
+            missing_molecules = [
+                m for m in batch if smiles_by_cas.get(m["molecule_id"]) is None
+            ]
+            names = [m["molecule_name"] for m in missing_molecules]
+
+            smiles_by_name = {}
+            if names:
+                smiles_by_name = get_smiles_batch(names, identifier_type="name")
+
+            # Combine the results
+            combined_smiles = {**smiles_by_cas, **smiles_by_name}
+
+            # Process each molecule in parallel
+            batch_results = []
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(process_molecule, info, combined_smiles)
+                    for info in batch
+                ]
+                for future in futures:
+                    batch_results.extend(future.result())
+                    pbar.update(1)
+
+            data.extend(batch_results)
 
     df = pd.DataFrame(data)
-    
-    # Detect outliers in absorption data
-    wavelength_outliers = detect_outliers(df, "Wavelength")
-    absorption_outliers = detect_outliers(df, "Absorption Maxima")
-    
-    # Add outlier flags to DataFrame
-    df["Wavelength_Outlier"] = wavelength_outliers
-    df["Absorption_Outlier"] = absorption_outliers
-    
-    df.to_csv(output_csv, index=False)
-    successful_molecules = len(set(df['Molecule Name']))
-    total_molecules = len(files)
-    logging.info(f"{successful_molecules}/{total_molecules} molecules successfully processed.")
+
+    if not df.empty:
+        # Detect outliers in absorption data
+        wavelength_outliers = detect_outliers(df, "Wavelength")
+        absorption_outliers = detect_outliers(df, "Absorption Maxima")
+
+        # Add outlier flags to DataFrame
+        df["Wavelength_Outlier"] = wavelength_outliers
+        df["Absorption_Outlier"] = absorption_outliers
+
+        df.to_csv(output_csv, index=False)
+        successful_molecules = len(set(df["Molecule Name"]))
+        logging.info(
+            f"{successful_molecules}/{total_files} molecules successfully processed."
+        )
+    else:
+        logging.warning("No data was processed. The output CSV will be empty.")
+        df.to_csv(output_csv, index=False)
 
 
 def canonicalize_smiles(smiles):
@@ -160,26 +275,30 @@ def process_molecular_csv(
         absorption_data = group[["Absorption Maxima", "Wavelength"]].values
         # Get wavelength corresponding to maximum absorption
         primary = absorption_data[absorption_data[:, 0].argmax()][1]
-        
+
         # Check if primary wavelength was marked as outlier
-        is_outlier = group.loc[group["Wavelength"] == primary, "Wavelength_Outlier"].iloc[0]
+        is_outlier = group.loc[
+            group["Wavelength"] == primary, "Wavelength_Outlier"
+        ].iloc[0]
 
         processed_data.append(
             {
                 "Molecule CAS": cas,
                 "MorganFingerprint": fingerprint,
                 "PrimaryWavelength": primary,
-                "Is_Outlier": is_outlier
+                "Is_Outlier": is_outlier,
             }
         )
 
     processed_df = pd.DataFrame(processed_data)
-    
+
     # Split data ensuring outliers are distributed between train and test sets
     unique_cas = processed_df["Molecule CAS"].unique()
     train_cas, test_cas = train_test_split(
-        unique_cas, test_size=test_size, random_state=random_state, 
-        stratify=processed_df.groupby("Molecule CAS")["Is_Outlier"].first()
+        unique_cas,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=processed_df.groupby("Molecule CAS")["Is_Outlier"].first(),
     )
     train_df = processed_df[processed_df["Molecule CAS"].isin(train_cas)]
     test_df = processed_df[processed_df["Molecule CAS"].isin(test_cas)]
@@ -202,7 +321,13 @@ def main():
     training_data_csv = config.TRAIN_DATA_CSV
     test_data_csv = config.TEST_DATA_CSV
 
-    extract_molecular_data(raw_dir, molecular_data_csv, max_peaks=config.MAX_PEAKS)
+    extract_molecular_data(
+        raw_dir,
+        molecular_data_csv,
+        max_peaks=config.MAX_PEAKS,
+        batch_size=50,
+        max_workers=8,
+    )
     process_molecular_csv(molecular_data_csv, training_data_csv, test_data_csv)
 
 
