@@ -6,6 +6,7 @@ Uses functions from utils.py to extract data from raw files.
 
 import os
 import re
+import time
 import logging
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -16,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 
 import config
-from src.utils import extract_absorption_data, get_smiles_batch
+from src.utils import extract_absorption_data, get_smiles_batch, save_cache
 
 
 class TqdmLoggingHandler(logging.Handler):
@@ -60,7 +61,7 @@ def detect_outliers(df, column, threshold=1.5):
 
 
 def extract_molecular_data(
-    raw_dir, output_csv, max_peaks=None, batch_size=50, max_workers=10
+    raw_dir, output_csv, max_peaks=None, batch_size=30, max_workers=8
 ):
     """
     Process raw absorption files from raw_dir and generate a CSV with molecular data.
@@ -185,6 +186,8 @@ def extract_molecular_data(
 
             smiles_by_name = {}
             if names:
+                if len(cas_ids) > 0:
+                    time.sleep(0.5)
                 smiles_by_name = get_smiles_batch(names, identifier_type="name")
 
             # Combine the results
@@ -325,9 +328,12 @@ def main():
         raw_dir,
         molecular_data_csv,
         max_peaks=config.MAX_PEAKS,
-        batch_size=50,
+        batch_size=30,
         max_workers=8,
     )
+
+    save_cache()
+    
     process_molecular_csv(molecular_data_csv, training_data_csv, test_data_csv)
 
 

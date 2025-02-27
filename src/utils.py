@@ -2,6 +2,8 @@ import time
 import logging
 import requests
 import numpy as np
+import os
+import json
 from scipy.signal import find_peaks
 from pubchempy import NotFoundError, PubChemHTTPError
 from sklearn.metrics import mean_squared_error, r2_score
@@ -10,9 +12,31 @@ from threading import Lock
 
 import config
 
-# Cache for PubChem API calls
+# Simple file-based cache
+CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "processed", "smiles_cache.json"
+)
 smiles_cache = {}
 smiles_cache_lock = Lock()
+
+# Load cache from file if it exists
+try:
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            smiles_cache = json.load(f)
+except Exception as e:
+    logging.error(f"Error loading cache: {e}")
+
+
+def save_cache():
+    """Save the SMILES cache to disk."""
+    try:
+        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+        with open(CACHE_FILE, "w") as f:
+            json.dump(smiles_cache, f)
+    except Exception as e:
+        logging.error(f"Error saving cache: {e}")
+
 
 logger = logging.getLogger()
 
@@ -196,20 +220,27 @@ def get_smiles_from_pubchem(
 
     for attempt in range(max_retries):
         try:
-            response = requests.get(url)
+            headers = {"User-Agent": "MoleculeDataProcessor/1.0"}
+            if attempt > 0:
+                sleep_time = retry_delay * (1.5**attempt)
+                time.sleep(sleep_time)
+
+            response = requests.get(url, headers=headers, timeout=10)
+
             if response.status_code == 200:
                 result = response.text.strip()
                 with smiles_cache_lock:
                     smiles_cache[cache_key] = result
+                    if len(smiles_cache) % 20 == 0:
+                        save_cache()
                 return result
             else:
                 logger.warning(
                     f"Attempt {attempt+1}: Failed to retrieve data for {identifier} (status {response.status_code})."
                 )
                 if attempt == max_retries - 1:
-                    with smiles_cache_lock:
-                        smiles_cache[cache_key] = None
                     return None
+
         except (NotFoundError, PubChemHTTPError) as e:
             logger.error(f"PubChem error for {identifier}: {e}")
             if "503" in str(e):
@@ -221,17 +252,16 @@ def get_smiles_from_pubchem(
                 with smiles_cache_lock:
                     smiles_cache[cache_key] = None
                 return None
+        except requests.exceptions.Timeout:
+            logger.warning(f"Timeout for {identifier}. Retrying...")
         except Exception as e:
             logger.error(f"Unexpected error for {identifier}: {e}")
-            with smiles_cache_lock:
-                smiles_cache[cache_key] = None
-            return None
+            if attempt == max_retries - 1:
+                return None
 
     logger.error(
         f"Failed to retrieve SMILES for {identifier} after {max_retries} attempts."
     )
-    with smiles_cache_lock:
-        smiles_cache[cache_key] = None
     return None
 
 
@@ -247,7 +277,9 @@ def mean_absolute_error_ev(y_true_nm, y_pred_nm):
     return np.mean(np.abs(y_true_ev - y_pred_ev))
 
 
-def get_smiles_batch(identifiers, identifier_type="name", max_workers=10):
+def get_smiles_batch(
+    identifiers, identifier_type="name", max_workers=8, batch_delay=0.2
+):
     """
     Retrieve SMILES for a batch of identifiers in parallel.
 
@@ -255,6 +287,7 @@ def get_smiles_batch(identifiers, identifier_type="name", max_workers=10):
         identifiers: List of identifiers (names, CAS numbers, etc.)
         identifier_type: Type of identifier ('name', 'cas', 'cid')
         max_workers: Maximum number of parallel workers
+        batch_delay: Small delay between API requests to avoid rate limiting
 
     Returns:
         Dictionary mapping identifiers to their SMILES strings or None if not found
@@ -262,14 +295,19 @@ def get_smiles_batch(identifiers, identifier_type="name", max_workers=10):
     results = {}
 
     def fetch_smiles(identifier):
+        if batch_delay > 0:
+            time.sleep(batch_delay * np.random.random())
         return identifier, get_smiles_from_pubchem(identifier, identifier_type)
 
-    # Parallel processing
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(fetch_smiles, id) for id in identifiers]
         for future in futures:
-            identifier, smiles = future.result()
-            results[identifier] = smiles
+            try:
+                identifier, smiles = future.result()
+                results[identifier] = smiles
+            except Exception as e:
+                logger.error(f"Error processing identifier in batch: {e}")
+    save_cache()
 
     return results
 
